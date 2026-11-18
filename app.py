@@ -7,6 +7,7 @@ import streamlit as st
 from docx import Document
 from dotenv import load_dotenv
 from pypdf import PdfReader
+from streamlit.errors import StreamlitSecretNotFoundError
 
 import ai_engine as ai
 from ui_theme import hero_html, inject_css
@@ -20,6 +21,17 @@ MODEL_OPTIONS_WITH_NOTES = [MODEL_DEFAULT, MODEL_WITH_NOTES, MODEL_WITHOUT_NOTES
 load_dotenv()
 st.set_page_config(page_title="StudyBuddy – AI Study Assistant", page_icon="🎓", layout="wide")
 inject_css()
+
+
+def get_api_key() -> str:
+    api_key = os.getenv("GROQ_API_KEY", "").strip()
+    if api_key:
+        return api_key
+    try:
+        return str(st.secrets.get("GROQ_API_KEY", "")).strip()
+    except StreamlitSecretNotFoundError:
+        return ""
+
 
 # --------------------------------------------------------------------------
 # Session state
@@ -38,6 +50,7 @@ DEFAULTS = {
     "quiz": None,
     "model_selection": MODEL_DEFAULT,
     "upload_widget_version": 0,
+    "groq_api_key_override": "",
 }
 for k, v in DEFAULTS.items():
     if k not in st.session_state:
@@ -84,12 +97,29 @@ def remove_notes() -> None:
     st.session_state.upload_widget_version += 1
 
 
+def clear_api_key_override() -> None:
+    st.session_state.groq_api_key_override = ""
+
+
 # --------------------------------------------------------------------------
 # Sidebar
 # --------------------------------------------------------------------------
 with st.sidebar:
     st.header("⚙️ Settings")
-    api_key = os.getenv("GROQ_API_KEY", "").strip()
+    configured_api_key = get_api_key()
+    api_key_override = st.text_input(
+        "Groq API key (optional override)",
+        type="password",
+        key="groq_api_key_override",
+        help="Use another Groq key for this session without changing your app configuration.",
+    ).strip()
+    api_key = api_key_override or configured_api_key
+    if api_key_override:
+        st.caption("Using the sidebar key for this session.")
+        st.button("Use configured key", on_click=clear_api_key_override, use_container_width=True)
+    elif not configured_api_key:
+        st.caption("Enter a Groq key above, or set GROQ_API_KEY in your .env file or app secrets.")
+
     upload_key = f"notes_upload_{st.session_state.upload_widget_version}"
     upload = st.session_state.get(upload_key)
     model_options = MODEL_OPTIONS_WITH_NOTES if upload is not None else MODEL_OPTIONS_WITHOUT_NOTES
@@ -109,8 +139,6 @@ with st.sidebar:
             else "GPT-OSS 120B · openai/gpt-oss-120b"
         ),
     )
-    if not api_key:
-        st.caption("Set API_KEY in your .env file. Create a key at console.groq.com/keys.")
     st.divider()
     st.subheader("📚 Study notes")
     upload = st.file_uploader(
